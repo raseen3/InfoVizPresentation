@@ -1,0 +1,513 @@
+---
+title: "InfoViz"
+---
+
+**Select the metric that you want to see associated with the collaborators and individuals.**
+
+```{ojs}
+viewof selectMetric = Inputs.select(["Total Box Office", "Average Box Office", "Average Rating"], {label: "Select Metric"})
+```
+
+---
+
+**This will zoom and focus on the selected director**
+
+```{ojs}
+viewof selectDirector = Inputs.select([null].concat(nodesFiltered.filter(d=>d.role === "Director").map(d=>d.name)), {label: "Select Director"})
+```
+
+---
+
+**This will highlight only the nodes and links associated with that chosen collaborator role**
+
+```{ojs}
+viewof selectRole = Inputs.select([null].concat(["Editor", "Cinematographer", "Music Composer"]), {label: "Filter Collaborator"})
+```
+
+---
+
+**Toggle interactions as per your needs; hovering over a node or a link will highlight only those nodes and links associated with it.**
+
+```{ojs}
+viewof interactionOptions = Inputs.checkbox(new Map([["Highlight Node on Hover", "nodeHover"], ["Highlight Link on Hover", "linkHover"]]), {label: "Select Interactions", value: []})
+```
+
+---
+
+```{ojs}
+Swatches(d3.scaleOrdinal(['Director', 'Editor', 'Cinematographer', 'Music Composer'], d3.schemeCategory10))
+```
+
+```{ojs}
+chart = {
+
+  const width = 2205;
+  const height = 1350;
+  
+  const roles = ['Director', 'Editor', 'Cinematographer', 'Music Composer'];
+
+  const nodes = nodesFiltered;
+  const links = linksFiltered;
+
+  const totalBoxOfficeRadiusScale = d3.scaleSqrt()
+    .domain([d3.min(nodes, d => d.sum_box_office), d3.max(nodes, d => d.sum_box_office)])
+    .range([5, 30]);
+
+  const totalBoxOfficeStrokeWidthScale = d3.scaleLinear()
+    .domain([d3.min(links, d => d.sum_box_office), d3.max(links, d => d.sum_box_office)])
+    .range([2, 12]);
+
+  const averageBoxOfficeRadiusScale = d3.scaleSqrt()
+    .domain([d3.min(nodes, d => d.avg_box_office), d3.max(nodes, d => d.avg_box_office)])
+    .range([5, 30]);
+
+  const averageBoxOfficeStrokeWidthScale = d3.scaleLinear()
+    .domain([d3.min(links, d => d.avg_box_office), d3.max(links, d => d.avg_box_office)])
+    .range([2, 10]);
+
+  const averageRatingRadiusScale = d3.scaleLinear()
+    .domain([d3.min(nodes, d => d.avg_rating), d3.max(nodes, d => d.avg_rating)])
+    .range([5, 20]);
+
+  const averageRatingStrokeWidthScale = d3.scaleLinear()
+    .domain([d3.min(links, d => d.avg_rating), d3.max(links, d => d.avg_rating)])
+    .range([1, 5]);
+
+  const roleColor = d3.scaleOrdinal()
+      .domain(roles)
+      .range(d3.schemeCategory10);
+  
+  const simulation = d3.forceSimulation(nodes)
+      .force("link", d3.forceLink(links).id(d => d.id))
+      .force("charge", d3.forceManyBody().strength(-400))
+      .force("x", d3.forceX())
+      .force("y", d3.forceY());
+
+  const zoom = d3.zoom()
+    .scaleExtent([0.1, 4])
+    .on("zoom", zoomed);
+
+  function zoomed(event) {
+      mainGroup.attr("transform", event.transform);
+  }
+  
+  const svg = d3.create("svg")
+    .attr("viewBox", [-width / 2, -height / 2, width, height])
+    .attr("width", width)
+    .attr("height", height)
+    .attr("style", "max-width: 100%; height: auto; font: 12px sans-serif;")
+    .call(zoom);
+
+  const mainGroup = svg.append("g");
+
+  const focusNode = nodes.find(d => d.name === selectDirector);
+  if(focusNode){
+    const scale = 4;
+    const x = -focusNode.x * scale;
+    const y = -focusNode.y * scale;
+    
+    svg.transition()
+      .duration(750)
+      .call(
+        zoom.transform,
+        d3.zoomIdentity.translate(x, y).scale(scale),
+        d3.pointer(event, mainGroup.node())
+      );
+  } else {
+     svg.transition()
+      .duration(750)
+      .call(zoom.transform, d3.zoomIdentity);
+  }
+
+  function setEdgeThickness(d){
+    let thickness;
+    if(selectMetric === "Total Box Office"){
+      thickness = totalBoxOfficeStrokeWidthScale(d.sum_box_office)
+    } else if(selectMetric === "Average Box Office"){
+      thickness = averageBoxOfficeStrokeWidthScale(d.avg_box_office)
+    } else if(selectMetric === "Average Rating"){
+      thickness = averageRatingStrokeWidthScale(d.avg_rating)
+    }
+    return thickness;
+  }
+  
+  const link = mainGroup.append("g")
+      .attr('fill', 'none')
+      .attr("stroke-width", 1.5)
+      .selectAll("line")
+      .data(links)
+      .join("line")
+      .attr("stroke", d => roleColor(d.role))
+      .attr("stroke-width", d => setEdgeThickness(d))
+      .attr("opacity", d =>{
+        if(selectRole){
+          return d.role === selectRole || d.role == "Director" ? 1 : 0.1;
+        }else{
+          return 1
+        }
+      })
+      .on("click", displayDialog);
+
+  link.append('title')
+      .text(d => showToolTipValue(d, "link"));
+
+  if(interactionOptions.includes('linkHover') && !selectRole){
+      link.on("mouseover", function(event, d) {
+      node.style("opacity", o => (o === d.source || o === d.target) ? 1 : 0.25);
+      
+      link.style("opacity", l => (l === d) ? 1 : 0.25);
+      });
+      
+      link.on("mouseout", function() {
+            node.style("opacity", 1);
+            link.style("opacity", 1);
+        });
+  }else{
+    link.on("mouseover", null);
+    link.on("mouseout", null);
+  }
+  
+  const node = mainGroup.append("g")
+      .attr("fill", "currentColor")
+      .attr("stroke-linecap", "round")
+      .attr("stroke-linejoin", "round")
+      .selectAll("g")
+      .data(nodes)
+      .join("g")
+      .call(drag(simulation));
+
+  function setNodeRadius(d){
+    let radius;
+    if(selectMetric === "Total Box Office"){
+      radius = totalBoxOfficeRadiusScale(d.sum_box_office)
+    } else if(selectMetric === "Average Box Office"){
+      radius = averageBoxOfficeRadiusScale(d.avg_box_office)
+    } else if(selectMetric === "Average Rating"){
+      radius = averageRatingRadiusScale(d.avg_rating)
+    }
+    return radius;
+  }
+
+  function showToolTipValue(d, elem){
+     const formatter = new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0
+    });
+
+    const name = elem==="node" ? d.name : `${d.source_name} + ${d.target_name}`
+    if(selectMetric === "Total Box Office"){
+      return `${name}\n${formatter.format(d.sum_box_office)}\nClick the ${elem} for more`
+    } else if(selectMetric === "Average Box Office"){
+      return `${name}\n${formatter.format(d.avg_box_office)}\nClick the ${elem} for more`
+    } else if(selectMetric === "Average Rating"){
+      return `${name}\n${d.avg_rating}\nClick the ${elem} for more`
+    }
+  }
+
+  node.append("circle")
+      .attr("stroke", "white")
+      .attr("stroke-width", 1.5)
+      .attr("r", d => setNodeRadius(d))
+      .attr("fill", d => roleColor(d.role))
+      .attr("opacity", d =>{
+        if(selectRole){
+           return d.role === selectRole || d.role == "Director" ? 1 : 0.1;
+        }else{
+          return 1
+        }
+      })
+      .on("click", displayDialog)
+      .on('mouseover', function() {
+          d3.select(this).style("cursor", "move");
+      })
+      .on('mouseout', function() {
+          d3.select(this).style("cursor", "");
+      })
+      .append('title')
+      .text(d => showToolTipValue(d, "node"))
+      
+
+  node.append("text")
+      .attr("x", 8)
+      .attr("y", "0.31em")
+      .text(d => d.name)
+      .attr("opacity", d =>{
+        if(selectRole){
+           return d.role === selectRole || d.role == "Director" ? 1 : 0.1;
+        }else{
+          return 1
+        }
+      })
+      .on('mouseover', function() {
+          d3.select(this).style("cursor", "move");
+      })
+      .on('mouseout', function() {
+          d3.select(this).style("cursor", "");
+      })
+      .clone(true).lower()
+      .attr("fill", "none")
+      .attr("stroke", "white")
+      .attr("stroke-width", 3)
+    
+  function isConnected(a, b) {
+    return isConnectedAsTarget(a, b) || isConnectedAsSource(a, b) || a.index === b.index;
+  }
+  
+  function isConnectedAsSource(a, b) {
+      return linkedByIndex[`${a.index},${b.index}`];
+  }
+  
+  function isConnectedAsTarget(a, b) {
+      return linkedByIndex[`${b.index},${a.index}`];
+  }
+  
+  let linkedByIndex = {};
+  links.forEach(l => {
+      linkedByIndex[`${l.source.index},${l.target.index}`] = true;
+  });
+
+
+  if(interactionOptions.includes('nodeHover') && !selectRole){
+  
+      node.on("mouseover", function(event, d) {
+        
+        node.style("opacity", o => isConnected(o, d) ? 1 : 0.25);
+    
+        link.style("opacity", l => (l.source === d || l.target === d) ? 1 : 0.25);
+      });
+      
+      node.on("mouseout", function() {
+          node.style("opacity", 1);
+          link.style("opacity", 1);
+      });
+  }else{
+    node.on("mouseover", null);
+    node.on("mouseout", null);
+  } 
+  
+  simulation.on("tick", () => {
+    link.attr("x1", d => d.source.x)
+        .attr("y1", d => d.source.y)
+        .attr("x2", d => d.target.x)
+        .attr("y2", d => d.target.y);
+    node.attr("transform", d => `translate(${d.x},${d.y})`);
+  });
+
+  function dragstarted(d) {
+    if (!d3.event.active) simulation.alphaTarget(0.3).restart();
+    d.fx = d.x;
+    d.fy = d.y;
+  }
+
+  function dragged(d) {
+    d.fx = d3.event.x;
+    d.fy = d3.event.y;
+  }
+
+  function dragended(d) {
+    if (!d3.event.active) simulation.alphaTarget(0);
+    d.fx = null;
+    d.fy = null;
+  }
+
+  return svg.node();
+}
+```
+
+```{ojs}
+
+function displayDialog(d) {
+    const MARGIN = 10;
+
+    const svgBounds = d3.select('svg').node().getBoundingClientRect();
+
+    const svgWidth = svgBounds.width;
+    const svgHeight = svgBounds.height;
+    const svgTop = svgBounds.top;
+    const svgLeft = svgBounds.left;
+  
+    const dialog = d3.select("body")
+        .append("div")
+        .attr("class", "dialog")
+        .style("position", "absolute")
+        .style("z-index", "10")
+        .style("background", "#FFF")
+        .style("border", "1px solid #000")
+        .style("padding", "10px")
+        .style("max-height", "300px")
+        .style("overflow", "auto");
+
+    const closeButton = dialog.append("div")
+        .attr("class", "close-button")
+        .style("position", "absolute")
+        .style("top", "0px")
+        .style("right", "0px")
+        .style("padding", "5px 10px")
+        .style("cursor", "pointer")
+        .style("font-size", "16px")
+        .text("✖")
+        .on("click", () => {
+            dialog.remove();
+        });
+
+    const formatter = new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0
+    });
+
+    if(d.target.nodeName == "line"){
+      dialog.append("p")
+        .text(`Director: ${d.target.__data__.source_name}`);
+      dialog.append("p")
+        .text(`${d.target.__data__.role}: ${d.target.__data__.target_name}`);
+    }else if(d.target.nodeName == "circle"){
+      dialog.append("p")
+        .text(`Name: ${d.target.__data__.name}`);
+      dialog.append("p")
+        .text(`Role: ${d.target.__data__.role}`);
+    }
+
+    dialog.append("p")
+        .text(`Total Box Office Gross: ${formatter.format(d.target.__data__.sum_box_office)}`);
+    dialog.append("p")
+        .text(`Average Box Office Gross: ${formatter.format(d.target.__data__.avg_box_office)}`);
+    dialog.append("p")
+        .text(`Average Rating: ${d.target.__data__.avg_rating.toFixed(2)}`);
+    
+    const movies = JSON.parse(d.target.__data__.movies);
+
+    const table = dialog.append("table")
+        .style("width", "100%")
+        .style("border-collapse", "collapse")
+        .style("border", "1px solid #ddd");
+
+    const headerRow = table.append("thead").append("tr");
+
+    const headers = ["Title", "Genre", "Rating", "Revenue", "Link"];
+
+    headers.forEach(header => {
+        headerRow.append("th")
+            .text(header)
+            .style("border", "1px solid #ddd")
+            .style("padding", "10px")
+            .style("background-color", "#f9f9f9");
+    });
+
+    const tbody = table.append("tbody");
+  
+    movies.forEach(movie => {
+        const row = tbody.append("tr");
+        
+        row.append("td")
+            .text(movie.title)
+            .style("border", "1px solid #ddd")
+            .style("padding", "10px");
+
+        row.append("td")
+            .text(movie.genre)
+            .style("border", "1px solid #ddd")
+            .style("padding", "10px");
+
+        row.append("td")
+            .text(movie.rating.toFixed(2))
+            .style("border", "1px solid #ddd")
+            .style("padding", "10px");
+
+        row.append("td")
+            .text(formatter.format(movie.revenue))
+            .style("border", "1px solid #ddd")
+            .style("padding", "10px");
+
+        row.append("td")
+            .style("border", "1px solid #ddd")
+            .style("padding", "10px")
+            .style("max-width", "150px")
+            .style("white-space", "nowrap")
+            .style("overflow", "hidden")
+            .style("text-overflow", "ellipsis")
+            .append("a")
+            .attr("href", movie.link)
+            .attr("target", "_blank")
+            .text("IMDb")
+            .style("text-decoration", "none")
+            .style("color", "blue");
+    });
+
+    dialog.append("button")
+        .text("Close")
+        .on("click", () => {
+            dialog.remove();
+        });
+
+    const dialogWidth = dialog.node().getBoundingClientRect().width;
+    const dialogHeight = dialog.node().getBoundingClientRect().height;
+
+    let left = d.pageX - svgLeft;
+    let top = d.pageY - svgTop;
+
+    if (left + dialogWidth + svgLeft > svgWidth) {
+        left -= (left + dialogWidth + svgLeft - svgWidth + MARGIN);
+    }
+
+    if (top + dialogHeight + svgTop > svgHeight) {
+        top -= (top + dialogHeight + svgTop - svgHeight + MARGIN);
+    }
+
+    if (top < MARGIN) {
+        top = MARGIN;
+    }
+
+    if (left < MARGIN) {
+        left = MARGIN;
+    }
+
+    dialog.style("left", `${left + svgLeft}px`)
+          .style("top", `${top + svgTop}px`);
+
+}
+```
+
+
+```{ojs}
+
+drag = simulation => {
+  
+  function dragstarted(event, d) {
+    if (!event.active) simulation.alphaTarget(0.3).restart();
+    d.fx = d.x;
+    d.fy = d.y;
+  }
+  
+  function dragged(event, d) {
+    d.fx = event.x;
+    d.fy = event.y;
+  }
+  
+  function dragended(event, d) {
+    if (!event.active) simulation.alphaTarget(0);
+    d.fx = null;
+    d.fy = null;
+  }
+  
+  return d3.drag()
+      .on("start", dragstarted)
+      .on("drag", dragged)
+      .on("end", dragended);
+}
+```
+
+```{ojs}
+nodesFiltered = FileAttachment("nodes-filtered.json").json();
+```
+
+```{ojs}
+linksFiltered = FileAttachment("links-filtered.json").json();
+```
+
+```{ojs}
+import {Swatches} from "@d3/color-legend"
+```
